@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Поиск товаров</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 50px 20px;
+            background-color: #f5f5f5;
+            color: #222;
+            transition: background 0.5s, color 0.5s;
+            overflow-x: hidden;
+        }
+
+        h1 {
+            text-align: center;
+            font-weight: 700;
+            margin-bottom: 30px;
+        }
+
+        .search-box {
+            position: relative;
+            max-width: 500px;
+            margin: 0 auto 30px auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #searchInput {
+            flex: 1;
+            padding: 10px 40px 10px 35px;
+            font-size: 16px;
+            border-radius: 25px;
+            border: 1px solid #ccc;
+            outline: none;
+            transition: background 0.3s, color 0.3s, border 0.3s;
+        }
+
+        #searchInput::placeholder {
+            color: #aaa;
+            font-size: 14px;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            width: 18px;
+            height: 18px;
+            fill: #00b4ff; /* современный голубой */
+            pointer-events: none;
+        }
+
+        .theme-button, .search-button {
+            padding: 8px 12px;
+            font-size: 14px;
+            border-radius: 20px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.2s;
+            color: white;
+        }
+
+        .theme-button {
+            background-color: #00b4ff;
+        }
+        .theme-button:hover { background-color: #009ace; transform: scale(1.05); }
+
+        .search-button {
+            background: linear-gradient(145deg, #00b4ff, #009ace);
+            border-radius: 25px;
+            border: none;
+            color: white;
+            font-size: 14px;
+            padding: 10px 16px;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.2s, box-shadow 0.2s;
+        }
+
+        .search-button:hover {
+            background: linear-gradient(145deg, #009ace, #009ace);
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        #results {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .result {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            background: #fff;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .result:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .time {
+            font-size: 14px;
+            margin: 10px 0;
+            color: #666;
+            transition: color 0.5s;
+        }
+
+        .theme-dark .time {
+            color: #aadfff;
+        }
+
+        .error {
+            color: red;
+            padding: 10px;
+            border: 1px solid red;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .product-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            transition: color 0.5s;
+        }
+
+        .theme-dark .product-title {
+            color: #aadfff;
+        }
+
+        .product-price {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .theme-splash {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background-color: #00b4ff;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 9999;
+            opacity: 0.3;
+            transition: width 0.6s ease-out, height 0.6s ease-out, opacity 0.6s ease-out;
+        }
+
+        .theme-dark {
+            background-color: #1e1e1e;
+            color: #f5f5f5;
+        }
+
+        .theme-dark #searchInput {
+            background-color: #2a2a2a;
+            color: #f5f5f5;
+            border: 1px solid #555;
+        }
+
+        .theme-dark .result {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+        }
+    </style>
+</head>
+<body>
+<h1>Поиск товаров</h1>
+
+<div class="search-box">
+    <svg class="search-icon" viewBox="0 0 24 24">
+        <path d="M10,2A8,8 0 1,0 18,10A8,8 0 0,0 10,2M21,21L15,15"/>
+    </svg>
+    <input type="text" id="searchInput" placeholder="Введите название товара...">
+    <button class="search-button" onclick="search()">Искать</button>
+    <button class="theme-button" onclick="toggleTheme()">🌗</button>
+</div>
+
+<div id="results"></div>
+<div id="splash" class="theme-splash"></div>
+
+<script>
+    let darkMode = false;
+
+    function toggleTheme() {
+        darkMode = !darkMode;
+        document.body.classList.toggle('theme-dark', darkMode);
+
+        const splash = document.getElementById('splash');
+        splash.style.transition = 'none';
+        splash.style.width = '0';
+        splash.style.height = '0';
+        splash.style.opacity = '0.3';
+        splash.offsetHeight;
+        splash.style.transition = 'width 0.6s ease-out, height 0.6s ease-out, opacity 0.6s ease-out';
+        splash.style.width = '2000px';
+        splash.style.height = '2000px';
+        splash.style.opacity = '0';
+    }
+
+    function search() {
+        const query = document.getElementById('searchInput').value.trim();
+        if (!query) {
+            alert('Введите запрос для поиска');
+            return;
+        }
+
+        document.getElementById('results').innerHTML = '<div>Поиск...</div>';
+        const startTime = performance.now();
+
+        fetch('/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: query })
+        })
+        .then(response => { if (!response.ok) throw new Error('Ошибка сети'); return response.json(); })
+        .then(data => {
+            const resultsDiv = document.getElementById('results');
+            if (data.success) {
+                let elapsed = performance.now() - startTime;
+                let html = `<div class="time">Найдено товаров: ${data.count}, время поиска: ${elapsed.toFixed(2)} мс</div>`;
+                if (data.results && data.results.length > 0) {
+                    data.results.forEach(product => {
+                        html += `<div class="result">
+                                    <div class="product-title">${product.title || 'Без названия'}</div>
+                                    <div>Производитель: ${product.manufacturer || ''}</div>
+                                    <div>Код: ${product.productCode || ''}</div>
+                                    <div>Внешний ID: ${product.externalId || ''}</div>
+                                    <div style="font-size: 13px; color: #888;">
+                                        Релевантность: ${product.score ? product.score.toFixed(3) : '0.000'}
+                                    </div>
+                                    ${product.price ? `<div class="product-price">Цена: ${product.price} руб.</div>` : ''}
+                                    ${product.category ? `<div>Категория: ${product.category}</div>` : ''}
+                                </div>`;
+                    });
+
+                } else {
+                    html += '<div>Товары не найдены</div>';
+                }
+                resultsDiv.innerHTML = html;
+            } else {
+                resultsDiv.innerHTML = `<div class="error">Ошибка: ${data.error || 'Неизвестная ошибка'}</div>`;
+            }
+        })
+        .catch(error => {
+            document.getElementById('results').innerHTML =
+                `<div class="error">Ошибка подключения: ${error.message}</div>`;
+        });
+    }
+
+    document.getElementById('searchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') search();
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('searchInput').focus();
+    });
+</script>
+</body>
+</html>
