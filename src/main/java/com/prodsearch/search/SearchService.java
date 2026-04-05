@@ -130,21 +130,48 @@ public class SearchService {
         String normQuery = normalizeText(originalQuery);
         String phoneticQuery = PhoneticUtil.toPhonetic(normQuery);
 
-        // 2. Создание запроса через DisMax
+        String phoneticQuery = PhoneticUtil.toPhonetic(originalQuery);
+
+        java.util.List<Query> queryList = new java.util.ArrayList<>();
+
+        // 1. Поиск по кодам (если есть цифры/буквы латиницы)
+        if (!cleanQuery.isBlank()) {
+            queryList.add(Query.of(q -> q.term(t -> t.field("allCodes.keyword").value(cleanQuery).boost(2000f))));
+            queryList.add(Query.of(q -> q.wildcard(w -> w.field("allCodes.keyword").value("*" + cleanQuery + "*").boost(500f))));
+            queryList.add(Query.of(q -> q.prefix(p -> p.field("allCodes.keyword").value(cleanQuery).boost(800f))));
+            queryList.add(Query.of(q -> q.match(m -> m.field("allCodes.keyword").query(cleanQuery).fuzziness("1").boost(1f))));
+        }
+
+        // 2. Поиск по названию и фонетике (ТОЛЬКО если букв >= 3)
+        // Используем те же веса и параметры, по которым у тебя "работало"
+        if (letterCount >= 3) {
+            // Поиск по Title (твой q3)
+            queryList.add(Query.of(q -> q.match(m -> m
+                    .field("title")
+                    .query(originalQuery)
+                    .boost(50f)
+            )));
+
+            // Поиск по Фонетике (твой q4)
+            if (!phoneticQuery.isBlank()) {
+                queryList.add(Query.of(q -> q.match(m -> m
+                        .field("phonetic")
+                        .query(phoneticQuery)
+                        .fuzziness("AUTO")
+                        .boost(10f)
+                )));
+            }
+        }
+
+        if (queryList.isEmpty()) {
+            System.out.println("Ничего не найдено (запрос не прошел фильтры).");
+            return;
+        }
+
         Query searchQuery = Query.of(q -> q
                 .disMax(dm -> dm
-                        .queries(
-                                Query.of(q1 -> q1.term(t -> t.field("allCodes.keyword").value(cleanQuery).boost(1000f))),
-                                Query.of(q2 -> q2.match(m -> m.field("allCodes.numeric").query(originalQuery).boost(100f))),
-                                Query.of(q3 -> q3.match(m -> m.field("title").query(originalQuery).boost(50f))),
-                                Query.of(q4 -> q4.match(m -> m
-                                        .field("phonetic")
-                                        .query(phoneticQuery)
-                                        .fuzziness("AUTO")
-                                        .boost(10f)
-                                ))
-                        )
-                        .tieBreaker(0.7)
+                        .queries(queryList)
+                        .tieBreaker(0.01)
                 )
         );
 
