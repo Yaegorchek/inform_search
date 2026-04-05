@@ -101,7 +101,7 @@ public class SearchService {
 
     private final ElasticsearchClient client;
     private static final String INDEX = "products";
-    private static final int MAX_RESULTS = 100;
+    private static final int MAX_RESULTS = 10;
 
     public SearchService(ElasticsearchClient client) {
         this.client = client;
@@ -125,10 +125,8 @@ public class SearchService {
      * Выполняет комбинированный поиск по артикулу и названию с весами.
      */
     private void executeGeneralSearch(String originalQuery, long startTime) throws IOException {
-        // 1. Подготовка
         String cleanQuery = originalQuery.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
 
-        // Считаем буквы (учитываем и латиницу, и кириллицу)
         long letterCount = originalQuery.chars().filter(Character::isLetter).count();
 
         String phoneticQuery = PhoneticUtil.toPhonetic(originalQuery);
@@ -144,16 +142,13 @@ public class SearchService {
         }
 
         // 2. Поиск по названию и фонетике (ТОЛЬКО если букв >= 3)
-        // Используем те же веса и параметры, по которым у тебя "работало"
         if (letterCount >= 3) {
-            // Поиск по Title (твой q3)
             queryList.add(Query.of(q -> q.match(m -> m
                     .field("title")
                     .query(originalQuery)
                     .boost(50f)
             )));
 
-            // Поиск по Фонетике (твой q4)
             if (!phoneticQuery.isBlank()) {
                 queryList.add(Query.of(q -> q.match(m -> m
                         .field("phonetic")
@@ -176,7 +171,6 @@ public class SearchService {
                 )
         );
 
-        // 3. Выполнение
         SearchResponse<Product> resp = client.search(sr -> sr
                         .index(INDEX)
                         .size(MAX_RESULTS)
