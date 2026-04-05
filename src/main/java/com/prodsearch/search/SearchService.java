@@ -127,8 +127,9 @@ public class SearchService {
     private void executeGeneralSearch(String originalQuery, long startTime) throws IOException {
         // 1. Подготовка
         String cleanQuery = originalQuery.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
-        String normQuery = normalizeText(originalQuery);
-        String phoneticQuery = PhoneticUtil.toPhonetic(normQuery);
+
+        // Считаем буквы (учитываем и латиницу, и кириллицу)
+        long letterCount = originalQuery.chars().filter(Character::isLetter).count();
 
         String phoneticQuery = PhoneticUtil.toPhonetic(originalQuery);
 
