@@ -14,6 +14,16 @@ public class App {
             ElasticsearchClient client = ElasticsearchConfig.createClient();
             DataImporter importer = new DataImporter();
 
+            /*
+            Для импорта данных надо раскомментировать importData и закомментировать следующие строчки:
+            SearchService searchService = new SearchService(client);
+            startInteractiveSearch(searchService);
+            После чего запустить
+
+            Для запуска поиска раскомментировать строчки 31-32
+            И закомментировать строчку 28.
+            */
+
             // --- Импорт данных поверх старого индекса ---
 //            importData(importer);
 
