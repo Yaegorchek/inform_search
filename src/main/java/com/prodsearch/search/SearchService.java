@@ -89,27 +89,30 @@ public class SearchService {
 package com.prodsearch.search;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import com.ibm.icu.text.Transliterator;
 import com.prodsearch.import_data.model.Product;
 
 import java.io.IOException;
-import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 
 public class SearchService {
 
     private final ElasticsearchClient client;
     private static final String INDEX = "products";
+    private static final Transliterator cyrToLat = Transliterator.getInstance(
+            "Cyrillic-Latin; Any-Latin; NFD; [:Nonspacing Mark:] Remove; NFC"
+    );
     private static final int MAX_RESULTS = 10;
 
     public SearchService(ElasticsearchClient client) {
         this.client = client;
     }
 
-    /**
-     * Основной метод поиска.
-     */
     public void Search(String query) throws IOException {
         long startTime = System.currentTimeMillis();
         if (query == null || query.isBlank()) {
@@ -121,63 +124,58 @@ public class SearchService {
         executeGeneralSearch(query, startTime);
     }
 
-    /**
-     * Выполняет комбинированный поиск по артикулу и названию с весами.
-     */
     private void executeGeneralSearch(String originalQuery, long startTime) throws IOException {
-        String cleanQuery = originalQuery.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+        // 1. Подготовка данных
+        String rawQuery = originalQuery.trim().toLowerCase();
 
-        long letterCount = originalQuery.chars().filter(Character::isLetter).count();
-
-        String phoneticQuery = PhoneticUtil.toPhonetic(originalQuery);
-
-        java.util.List<Query> queryList = new java.util.ArrayList<>();
-
-        // 1. Поиск по кодам (если есть цифры/буквы латиницы)
-        if (!cleanQuery.isBlank()) {
-            queryList.add(Query.of(q -> q.term(t -> t.field("allCodes.keyword").value(cleanQuery).boost(2000f))));
-            queryList.add(Query.of(q -> q.wildcard(w -> w.field("allCodes.keyword").value("*" + cleanQuery + "*").boost(500f))));
-            queryList.add(Query.of(q -> q.prefix(p -> p.field("allCodes.keyword").value(cleanQuery).boost(800f))));
-            queryList.add(Query.of(q -> q.match(m -> m.field("allCodes.keyword").query(cleanQuery).fuzziness("1").boost(1f))));
+        String normalizedCode;
+        if (rawQuery.matches(".*[а-яё].*")) {
+            String transliterated = cyrToLat.transliterate(rawQuery);
+            normalizedCode = ArticleExtractor.normalize(transliterated);
+        } else {
+            normalizedCode = ArticleExtractor.normalize(rawQuery);
         }
 
-        // 2. Поиск по названию и фонетике (ТОЛЬКО если букв >= 3)
-        if (letterCount >= 3) {
-            queryList.add(Query.of(q -> q.match(m -> m
-                    .field("title")
-                    .query(originalQuery)
-                    .boost(50f)
-            )));
+        // Переменная для лямбд
+        final String finalNormalized = normalizedCode;
 
-            if (!phoneticQuery.isBlank()) {
-                queryList.add(Query.of(q -> q.match(m -> m
-                        .field("phonetic")
-                        .query(phoneticQuery)
-                        .fuzziness("AUTO")
-                        .boost(10f)
-                )));
-            }
+        long digitCount = normalizedCode.chars().filter(Character::isDigit).count();
+
+        List<Query> shouldQueries = new ArrayList<>();
+
+        // 2. ФОНЕТИКА
+        String phoneticQuery = PhoneticUtil.toPhonetic(rawQuery);
+
+        // 3. РАСПРЕДЕЛЕНИЕ ВЕСОВ
+        if (digitCount > 0) {
+            // СЦЕНАРИЙ: АРТИКУЛ
+            shouldQueries.add(Query.of(q -> q.term(t -> t.field("allCodes.keyword").value(finalNormalized).boost(2000f))));
+            shouldQueries.add(Query.of(q -> q.prefix(p -> p.field("allCodes.keyword").value(finalNormalized).boost(1000f))));
+            // Фонетика для артикулов
+            shouldQueries.add(Query.of(q -> q.match(m -> m.field("phonetic").query(phoneticQuery).boost(0.01f))));
+        } else {
+            // 1. Ищем оригинал
+            shouldQueries.add(Query.of(q -> q.match(m -> m.field("title").query(rawQuery).fuzziness("2").boost(600f))));
+
+            // 2. Фонетика
+            shouldQueries.add(Query.of(q -> q.match(m -> m
+                    .field("phonetic")
+                    .query(phoneticQuery)
+                    .boost(600f))));
         }
 
-        if (queryList.isEmpty()) {
-            System.out.println("Ничего не найдено (запрос не прошел фильтры).");
-            return;
-        }
-
-        Query searchQuery = Query.of(q -> q
-                .disMax(dm -> dm
-                        .queries(queryList)
-                        .tieBreaker(0.01)
-                )
-        );
+        // 4. ВЫПОЛНЕНИЕ ЗАПРОСА
+        Query finalQuery = Query.of(q -> q.bool(b -> b.should(shouldQueries).minimumShouldMatch("1")));
 
         SearchResponse<Product> resp = client.search(sr -> sr
                         .index(INDEX)
                         .size(MAX_RESULTS)
-                        .query(searchQuery),
+                        .query(finalQuery)
+                        .minScore(1.0), // Не показываем мусор
                 Product.class
         );
 
+        // 5. ВЫВОД
         printResults(resp, startTime);
     }
 
@@ -190,11 +188,13 @@ public class SearchService {
             int counter = 1;
             for (Hit<Product> hit : resp.hits().hits()) {
                 Product p = hit.source();
+                if (p == null) continue;
+
                 System.out.printf("%d) [Score: %.2f] Title: %s%n   Manufacturer: %s%n   ProductCode: %s%n   ID: %s%n",
                         counter,
                         hit.score() != null ? hit.score() : 0.0,
-                        p.getTitle() != null ? p.getTitle() : "не указано",
-                        p.getManufacturer() != null ? p.getManufacturer() : "не указано",
+                        p.getTitle(),
+                        p.getManufacturer(),
                         p.getProductCode() != null ? p.getProductCode() : "не указано",
                         hit.id()
                 );
@@ -204,13 +204,5 @@ public class SearchService {
         }
         System.out.println("Время выполнения: " + (endTime - startTime) + " мс");
         System.out.println("==================================================");
-    }
-
-    private String normalizeText(String text) {
-        if (text == null) return "";
-        text = text.toLowerCase(Locale.ROOT);
-        text = text.replaceAll("(\\p{L})\\1+", "$1"); // Удаление удвоенных букв
-        text = text.replaceAll("[^\\p{L}\\p{Nd} ]+", ""); // Удаление спецсимволов
-        return text;
     }
 }

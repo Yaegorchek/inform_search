@@ -50,7 +50,7 @@ public class App {
     private static void startInteractiveSearch(SearchService searchService) {
         Scanner scanner = new Scanner(System.in);
 
-        System.out.println("=== ПОИСК ТОВАРОВ В ELASTICSEARCH (KNN по вектору) ===");
+        System.out.println("=== ПОИСК ТОВАРОВ ===");
         System.out.println("Для выхода введите 'exit'");
 
         while (true) {

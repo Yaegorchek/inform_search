@@ -1,19 +1,19 @@
 package com.prodsearch.import_data;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prodsearch.config.ElasticsearchConfig;
 import com.prodsearch.import_data.model.Product;
 import com.prodsearch.search.PhoneticUtil;
-
+import com.prodsearch.search.ArticleExtractor; // Тот самый экстрактор артикулов
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch.indices.CreateIndexResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
-import co.elastic.clients.elasticsearch.core.bulk.IndexOperation;
-import co.elastic.clients.elasticsearch.core.BulkResponse;
+import co.elastic.clients.elasticsearch.indices.CreateIndexResponse;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.io.File;
+import java.util.*;
 
 public class DataImporter {
 
@@ -28,18 +28,15 @@ public class DataImporter {
     public void recreateIndexAndImport(String filePath) throws Exception {
         try {
             client.indices().delete(d -> d.index(INDEX));
-        } catch (Exception e) {
-            System.out.println("Индекс еще не существует.");
-        }
+        } catch (Exception e) {}
 
-        CreateIndexResponse createResp = client.indices().create(c -> c
+        client.indices().create(c -> c
                 .index(INDEX)
                 .settings(s -> s
-                        // ДОБАВЛЯЕМ ЭТУ НАСТРОЙКУ
                         .index(i -> i.maxNgramDiff(7))
                         .analysis(a -> a
-                                .filter("russian_stop", f -> f.definition(d -> d.stop(st -> st.stopwords("_russian_"))))
-                                .filter("russian_stemmer", f -> f.definition(d -> d.stemmer(st -> st.language("russian"))))
+                                .filter("english_stop", f -> f.definition(d -> d.stop(st -> st.stopwords("_english_"))))
+                                .filter("english_stemmer", f -> f.definition(d -> d.stemmer(st -> st.language("english"))))
                                 .filter("code_ngram", f -> f.definition(d -> d.ngram(n -> n.minGram(3).maxGram(8))))
                                 .filter("alphanumeric", f -> f.definition(d -> d.wordDelimiter(wd -> wd
                                         .generateNumberParts(true)
@@ -48,9 +45,10 @@ public class DataImporter {
                                 .analyzer("title_analyzer", t -> t
                                         .custom(cust -> cust
                                                 .tokenizer("standard")
-                                                .filter(List.of("lowercase", "russian_stop", "russian_stemmer"))
+                                                .filter(List.of("lowercase", "english_stop", "english_stemmer"))
                                         )
                                 )
+                                // Твои анализаторы для кодов без изменений
                                 .analyzer("code_analyzer", t -> t
                                         .custom(cust -> cust
                                                 .tokenizer("keyword")
@@ -66,9 +64,7 @@ public class DataImporter {
                         )
                 )
                 .mappings(m -> m
-                        .properties("id", p -> p.keyword(k -> k))
                         .properties("title", p -> p.text(t -> t.analyzer("title_analyzer")))
-                        .properties("manufacturer", p -> p.keyword(k -> k))
                         .properties("allCodes", p -> p
                                 .text(t -> t
                                         .analyzer("code_analyzer")
@@ -77,87 +73,76 @@ public class DataImporter {
                                 )
                         )
                         .properties("productCode", p -> p.keyword(k -> k))
+                        .properties("manufacturer", p -> p.keyword(k -> k))
                         .properties("externalId", p -> p.keyword(k -> k))
                         .properties("phonetic", p -> p.text(t -> t))
                 )
         );
 
-        if (!createResp.acknowledged()) {
-            throw new RuntimeException("Index creation failed");
-        }
-
-        importProductsToElasticsearch(filePath);
+        processFileStreaming(filePath);
     }
 
-    public int importProductsToElasticsearch(String filePath) throws Exception {
-        List<Product> products = new JsonParser().parseProductsFromFile(filePath);
-        int total = 0;
+    private void processFileStreaming(String filePath) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonFactory factory = new JsonFactory();
+        List<Product> batch = new ArrayList<>();
+        int totalProcessed = 0;
 
-        for (int i = 0; i < products.size(); i += BATCH_SIZE) {
-            List<Product> batch = products.subList(i, Math.min(i + BATCH_SIZE, products.size()));
-            total += bulkImport(batch);
-        }
-
-        return total;
-    }
-
-    private String cleanCode(String code) {
-        return code.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
-    }
-
-    private int bulkImport(List<Product> products) throws Exception {
-        List<BulkOperation> ops = new ArrayList<>();
-
-        for (Product p : products) {
-            Set<String> codesSet = new HashSet<>();
-
-            if (p.getProductCode() != null) {
-                codesSet.add(cleanCode(p.getProductCode()));
+        try (JsonParser parser = factory.createParser(new File(filePath))) {
+            while (parser.nextToken() != JsonToken.START_ARRAY) {
+                if (parser.getCurrentToken() == null) return;
             }
 
-            if (p.getTitle() != null) {
-                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("[a-zA-Z0-9/-]{4,}");
-                java.util.regex.Matcher matcher = pattern.matcher(p.getTitle());
-                while (matcher.find()) {
-                    String found = matcher.group();
-                    if (found.matches(".*\\d.*")) {
-                        codesSet.add(cleanCode(found));
-                    }
+            while (parser.nextToken() == JsonToken.START_OBJECT) {
+                Product p = mapper.readValue(parser, Product.class);
+
+                prepareProductData(p);
+
+                batch.add(p);
+
+                if (batch.size() >= BATCH_SIZE) {
+                    executeBulk(batch);
+                    totalProcessed += batch.size();
+                    System.out.println("Загружено: " + totalProcessed);
+                    batch.clear();
                 }
             }
-
-            p.setAllCodes(new ArrayList<>(codesSet));
-
-            if (p.getProductCode() != null) {
-                p.setProductCode(cleanCode(p.getProductCode()));
+            if (!batch.isEmpty()) {
+                executeBulk(batch);
+                totalProcessed += batch.size();
             }
+        }
+        System.out.println("Готово! Всего объектов: " + totalProcessed);
+    }
 
-            String rawTitle = p.getTitle() != null ? p.getTitle() : "";
+    private void prepareProductData(Product p) {
+        Set<String> extractedCodes = new HashSet<>();
 
-            String titleOnlyText = rawTitle.replaceAll("[0-9/-]", " ").replaceAll("\\s+", " ").trim();
+        if (p.getTitle() != null) {
+            extractedCodes.addAll(ArticleExtractor.extract(p.getTitle()));
 
-            if (!titleOnlyText.isEmpty()) {
-                p.setPhonetic(PhoneticUtil.toPhonetic(titleOnlyText));
-            } else {
-                p.setPhonetic(PhoneticUtil.toPhonetic(rawTitle));
+            String cleanText = p.getTitle().replaceAll("[^а-яА-ЯёЁa-zA-Z\\s]", " ").trim();
+            p.setPhonetic(PhoneticUtil.toPhonetic(cleanText));
+        }
+
+        if (p.getProductCode() != null) {
+            String normalized = ArticleExtractor.normalize(p.getProductCode());
+            if (!normalized.isEmpty()) {
+                extractedCodes.add(normalized);
             }
+        }
 
-            ops.add(BulkOperation.of(b -> b.index(IndexOperation.of(io -> io
+        p.setAllCodes(new ArrayList<>(extractedCodes));
+    }
+
+    private void executeBulk(List<Product> products) throws Exception {
+        List<BulkOperation> ops = new ArrayList<>();
+        for (Product p : products) {
+            ops.add(BulkOperation.of(b -> b.index(i -> i
                     .index(INDEX)
                     .id(p.getExternalId())
-                    .document(p)
-            ))));
+                    .document(p))));
         }
-
-        BulkResponse resp = client.bulk(b -> b.operations(ops));
-        if (resp.errors()) {
-            resp.items().forEach(item -> {
-                if (item.error() != null) {
-                    System.err.println("Error indexing " + item.id() + ": " + item.error().reason());
-                }
-            });
-        }
-
-        return products.size();
+        client.bulk(b -> b.operations(ops));
     }
 }
