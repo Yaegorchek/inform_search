@@ -7,7 +7,6 @@ import lombok.Setter;
 
 import java.util.List;
 
-
 @Getter
 @Setter
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -18,6 +17,8 @@ public class Product {
     private String productCode;
     private String manufacturer;
     private List<String> allCodes;
+    private List<String> articleMasks;
+    private List<String> articleTypes;
     private String phonetic;
 
 }
