@@ -29,9 +29,35 @@ public class SearchService {
             return Collections.emptyList();
         }
 
-        if (cache.containsKey(query)) {
-            return cache.get(query);
-        }
+        // 1. Подготовка и распознавание артикулов
+        String rawQuery = query.trim().toLowerCase();
+        List<ArticleMatch> matches = articleExtractionService.extract(query);
+
+        List<Query> shouldQueries = new ArrayList<>();
+        String phoneticQuery = PhoneticUtil.toPhonetic(rawQuery);
+
+        // 2. Логика распределения весов (Сценарии A/B/C)
+        if (!matches.isEmpty()) {
+            // СЦЕНАРИЙ A/B: Если найден артикул
+            for (ArticleMatch match : matches) {
+                String finalNormalized = match.getNormalizedArticle();
+
+                // Точное совпадение артикула (самый высокий приоритет)
+                shouldQueries.add(Query.of(q -> q
+                        .term(t -> t.field("allCodes.keyword").value(finalNormalized).boost(2000f))));
+
+                // Поиск по префиксу артикула
+                shouldQueries.add(Query.of(q -> q
+                        .prefix(p -> p.field("allCodes.keyword").value(finalNormalized).boost(1000f))));
+            }
+            // Фонетика при поиске артикула имеет минимальный вес
+            shouldQueries.add(Query.of(q -> q
+                    .match(m -> m.field("phonetic").query(phoneticQuery).boost(0.01f))));
+        } else {
+            // СЦЕНАРИЙ C: Обычный текстовый поиск
+            // Поиск по названию с нечеткостью (Fuzziness)
+            shouldQueries.add(Query.of(q -> q
+                    .match(m -> m.field("title").query(rawQuery).fuzziness("2").boost(600f))));
 
         String normQuery = normalizeText(query);
         String phoneticQuery = PhoneticUtil.toPhonetic(normQuery);
