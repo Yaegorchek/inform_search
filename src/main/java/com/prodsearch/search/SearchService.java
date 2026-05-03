@@ -64,12 +64,9 @@ public class SearchService {
                     .match(m -> m.field("phonetic").query(phoneticQuery).fuzziness("2").boost(700f))));
         }
 
-        Query searchQuery = Query.of(q -> q
-                .match(m -> m
-                        .field("phonetic")
-                        .query(phoneticQuery)
-                        .fuzziness("AUTO")
-                )
+        // 3. Сборка финального Query
+        Query finalQuery = Query.of(q -> q
+                .bool(b -> b.should(shouldQueries).minimumShouldMatch("1"))
         );
 
         SearchResponse<Product> resp = client.search(sr -> sr
