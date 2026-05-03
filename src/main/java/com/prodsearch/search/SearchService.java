@@ -59,8 +59,10 @@ public class SearchService {
             shouldQueries.add(Query.of(q -> q
                     .match(m -> m.field("title").query(rawQuery).fuzziness("2").boost(600f))));
 
-        String normQuery = normalizeText(query);
-        String phoneticQuery = PhoneticUtil.toPhonetic(normQuery);
+            // Поиск по фонетике
+            shouldQueries.add(Query.of(q -> q
+                    .match(m -> m.field("phonetic").query(phoneticQuery).fuzziness("2").boost(700f))));
+        }
 
         Query searchQuery = Query.of(q -> q
                 .match(m -> m
