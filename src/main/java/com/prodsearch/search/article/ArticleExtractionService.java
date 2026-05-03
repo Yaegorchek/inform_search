@@ -167,10 +167,8 @@ public class ArticleExtractionService {
     private String joinTokens(List<String> tokens, int start, int endExclusive) {
         StringBuilder sb = new StringBuilder();
         for (int i = start; i < endExclusive; i++) {
-            if (i > start) {
-                sb.append(' ');
-            }
-            sb.append(tokens.get(i));
+            String token = tokens.get(i);
+            sb.append(token);
         }
         return sb.toString();
     }
