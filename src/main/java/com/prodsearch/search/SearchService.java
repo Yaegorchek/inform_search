@@ -72,7 +72,8 @@ public class SearchService {
         SearchResponse<Product> resp = client.search(sr -> sr
                         .index(INDEX)
                         .size(MAX_RESULTS)
-                        .query(searchQuery),
+                        .query(finalQuery)
+                        .minScore(1.0), // Отсекаем нерелевантный мусор
                 Product.class
         );
 
