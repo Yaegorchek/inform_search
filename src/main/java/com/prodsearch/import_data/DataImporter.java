@@ -5,6 +5,12 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prodsearch.config.ElasticsearchConfig;
+import com.prodsearch.detect.ConnectingRodBearingInfo;
+import com.prodsearch.detect.ConnectingRodBearingInfoDetector;
+import com.prodsearch.detect.ProductPartType;
+import com.prodsearch.detect.TechTextNormalizer;
+import com.prodsearch.detect.WheelHubInfo;
+import com.prodsearch.detect.WheelHubInfoDetector;
 import com.prodsearch.import_data.model.Product;
 import com.prodsearch.search.PhoneticUtil;
 import com.prodsearch.search.article.ArticleExtractionService;
@@ -18,6 +24,7 @@ import co.elastic.clients.elasticsearch.indices.CreateIndexResponse;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.*;
+import java.util.function.Function;
 
 public class DataImporter {
 
@@ -75,7 +82,30 @@ public class DataImporter {
                         .properties("articleTypes", p -> p.keyword(k -> k))
                         .properties("productCode", p -> p.keyword(k -> k))
                         .properties("manufacturer", p -> p.text(t -> t.analyzer("title_analyzer")))
-                        .properties("phonetic", p -> p.text(t -> t.analyzer("code_analyzer")))));
+                        .properties("phonetic", p -> p.text(t -> t.analyzer("code_analyzer")))
+                        .properties("partType", p -> p.keyword(k -> k))
+                        .properties("vehicleBrand", p -> p.keyword(k -> k))
+                        .properties("partBrand", p -> p.keyword(k -> k))
+                        .properties("oemCodes", p -> p.keyword(k -> k))
+                        .properties("features", p -> p.keyword(k -> k))
+                        .properties("engineModels", p -> p.keyword(k -> k))
+                        .properties("repairSize", p -> p.keyword(k -> k))
+                        .properties("kitType", p -> p.keyword(k -> k))
+                        .properties("quantity", p -> p.integer(i -> i))
+                        .properties("journalCount", p -> p.integer(i -> i))
+                        .properties("cylinderCount", p -> p.integer(i -> i))
+                        .properties("widthMm", p -> p.double_(d -> d))
+                        .properties("hubKind", p -> p.keyword(k -> k))
+                        .properties("hubThread", p -> p.keyword(k -> k))
+                        .properties("hubBoltPattern", p -> p.keyword(k -> k))
+                        .properties("hubGeometry", p -> p.keyword(k -> k))
+                        .properties("hubTonnage", p -> p.keyword(k -> k))
+                        .properties("hubBearingState", p -> p.keyword(k -> k))
+                        .properties("hubPosition", p -> p.keyword(k -> k))
+                        .properties("hubSide", p -> p.keyword(k -> k))
+                        .properties("hubAssembly", p -> p.boolean_(b -> b))
+                        .properties("hubAbs", p -> p.boolean_(b -> b))
+                        .properties("hubSeries", p -> p.keyword(k -> k))));
 
         processFileStreaming(filePath);
     }
@@ -142,6 +172,72 @@ public class DataImporter {
         p.setAllCodes(new ArrayList<>(extractedCodes));
         p.setArticleMasks(new ArrayList<>(extractedMasks));
         p.setArticleTypes(new ArrayList<>(extractedTypes));
+
+        enrichPartInfo(p);
+    }
+
+    private void enrichPartInfo(Product p) {
+        if (p == null || p.getTitle() == null || p.getTitle().isBlank()) {
+            return;
+        }
+
+        String title = p.getTitle();
+
+        ConnectingRodBearingInfo bearingInfo = ConnectingRodBearingInfoDetector.detect(title);
+        if (bearingInfo.detected()) {
+            p.setPartType(ProductPartType.CONNECTING_ROD_BEARINGS);
+            p.setVehicleBrand(bearingInfo.vehicleBrand());
+            p.setPartBrand(bearingInfo.bearingBrand());
+            p.setEngineModels(normalizeList(bearingInfo.engineModels(), TechTextNormalizer::normalizeEngineModel));
+            p.setRepairSize(bearingInfo.repairSize());
+            p.setKitType(bearingInfo.kitType());
+            p.setQuantity(bearingInfo.quantity());
+            p.setJournalCount(bearingInfo.journalCount());
+            p.setCylinderCount(bearingInfo.cylinderCount());
+            p.setWidthMm(bearingInfo.widthMm());
+            if (bearingInfo.features() != null) {
+                p.setFeatures(new ArrayList<>(bearingInfo.features()));
+            }
+            p.setOemCodes(normalizeList(bearingInfo.oemCodes(), TechTextNormalizer::normalizeOemCode));
+            return;
+        }
+
+        WheelHubInfo hubInfo = WheelHubInfoDetector.detect(title);
+        if (hubInfo.detected()) {
+            p.setPartType(ProductPartType.WHEEL_HUB);
+            p.setPartBrand(hubInfo.brand());
+            p.setOemCodes(normalizeList(hubInfo.oemCodes(), TechTextNormalizer::normalizeOemCode));
+            p.setHubKind(hubInfo.hubKind());
+            p.setHubThread(TechTextNormalizer.normalizeThread(hubInfo.threadSize()));
+            p.setHubBoltPattern(TechTextNormalizer.normalizeBoltPattern(hubInfo.boltPattern()));
+            p.setHubGeometry(TechTextNormalizer.normalizeGeometry(hubInfo.geometry()));
+            p.setHubTonnage(TechTextNormalizer.normalizeTonnage(hubInfo.tonnage()));
+            p.setHubBearingState(hubInfo.bearingState());
+            p.setHubPosition(hubInfo.position());
+            p.setHubSide(hubInfo.side());
+            p.setHubAssembly(hubInfo.assembly());
+            p.setHubAbs(hubInfo.abs());
+            if (hubInfo.series() != null) {
+                p.setHubSeries(List.of(hubInfo.series()));
+            }
+        }
+    }
+
+    private List<String> normalizeList(List<String> values, Function<String, String> normalizer) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String mapped = normalizer.apply(value);
+            if (mapped != null && !mapped.isBlank()) {
+                normalized.add(mapped);
+            }
+        }
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private void executeBulk(List<Product> products) throws Exception {

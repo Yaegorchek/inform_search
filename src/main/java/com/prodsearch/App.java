@@ -25,7 +25,7 @@ public class App {
              */
 
             // --- Импорт данных поверх старого индекса ---
-            // importData(importer);
+            importData(importer);
 
             // --- Интерактивный поиск ---
             SearchService searchService = new SearchService(client);

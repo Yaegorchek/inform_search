@@ -36,7 +36,7 @@ public class Product {
     private Integer quantity;
     private Integer journalCount;
     private Integer cylinderCount;
-    private String widthMm;
+    private Double widthMm;
 
     // For WHEEL_HUB
     private String hubKind;

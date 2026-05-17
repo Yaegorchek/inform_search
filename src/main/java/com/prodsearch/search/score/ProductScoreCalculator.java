@@ -212,7 +212,7 @@ public final class ProductScoreCalculator {
                     reasons.add("hub side matched: +20");
                 }
 
-                if (qh.abs()) {
+                if (Boolean.TRUE.equals(qh.abs())) {
                     if ((candidate.features() != null && candidate.features().contains("ABS"))
                             || cTitle.contains("abs")) {
                         score += 15;
@@ -220,7 +220,7 @@ public final class ProductScoreCalculator {
                     }
                 }
 
-                if (qh.assembly()) {
+                if (Boolean.TRUE.equals(qh.assembly())) {
                     if ((candidate.features() != null && candidate.features().contains("ASSEMBLY"))
                             || cTitle.contains("в сборе")) {
                         score += 15;
